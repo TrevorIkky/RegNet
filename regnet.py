@@ -148,7 +148,7 @@ class RegNet(pl.LightningModule):
 if __name__  == "__main__":
     cfm = Cifar10DataModule()
     model = RegNet(cfm.dims[0], cfm.num_classes, 'gru')
-    logger = TensorBoardLogger('./logs', name='regnet_logs')
+    logger = TensorBoardLogger('logs', name='regnet_logs')
     trainer = Trainer(fast_dev_run=True, logger=logger)
     trainer.fit(model, cfm)
 
