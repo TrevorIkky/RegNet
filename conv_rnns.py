@@ -36,12 +36,14 @@ class ConvLSTMCell(nn.Module):
             x_in + intermediate_channels, intermediate_channels *  4,
             kernel_size=kernel_size, padding= kernel_size // 2, bias=True
         )
-    def forward(self, x:Tensor, state:typing.Tuple) -> typing.Tuple:
+    def forward(self, x:Tensor, state:typing.Tuple[Tensor, Tensor]) -> typing.Tuple:
         """
         c and h channels = intermediate_channels so  a * c is valid
         if the last dim in c not equal to a then a has been halved
         """
         c, h = state
+        h = h.to(device=x.device)
+        c = c.to(device=x.device)
         x = torch.cat([x, h], dim=1)
         x = self.conv_x(x)
         a, b, g, d = torch.split(x, self.intermediate_channels, dim=1)
@@ -78,6 +80,7 @@ class ConvGRUCell(nn.Module):
         self.intermediate_channels = intermediate_channels
     def forward(self, x:Tensor, h:Tensor) -> Tensor:
         y = x.clone()
+        h = h.to(device=x.device)
         x = torch.cat([x, h], dim=1)
         x = self.conv_x(x)
         a, b = torch.split(x, self.intermediate_channels, dim=1)

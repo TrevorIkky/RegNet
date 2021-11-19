@@ -1,15 +1,15 @@
 import torch
-import torchvision
 import typing
 import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
 from conv_rnns import ConvGRUCell, ConvLSTMCell
 
-from torch.optim import Adam
-from torch.utils.data import DataLoader
-from pytorch_lightning.trainer import Trainer
 
+from torch.optim import Adam
+from pytorch_lightning.trainer import Trainer
+from pytorch_lightning.loggers import TensorBoardLogger
+from cifar10_datamodule import Cifar10DataModule
 
 learning_rate = 3e-4
 max_epochs = 10
@@ -51,11 +51,9 @@ class rnn_regulated_block(nn.Module):
         #print(f'Block running. x.shape : {x.shape}, h shape: {h.shape}')
         x = torch.cat([x, h], dim=1)
 
-
         x = self.conv3(x)
         x = self.bn3(x)
         x = self.relu(x)
-
 
         x = self.conv4(x)
         x = self.bn4(x)
@@ -76,6 +74,7 @@ class RegNet(pl.LightningModule):
         self.max_pool = nn.MaxPool2d((3, 3) , padding=1, stride=2)
         self.cell = ConvGRUCell if cell_type == 'gru' else ConvLSTMCell
         regulated_blocks = []
+
         for layer in range(len(layers)):
             stride = 1 if layer < 1 else 2
             channels = self.intermediate_channels if layer < 1 else self.intermediate_channels // 2
@@ -113,7 +112,7 @@ class RegNet(pl.LightningModule):
         x = self.relu(x)
         x = self.max_pool(x)
         c, h = torch.zeros(x.shape), torch.zeros(x.shape)
-        for i, block in enumerate(self.regulated_blocks):
+        for _, block in enumerate(self.regulated_blocks):
             #print(f'Block: {i}, x.shape: {x.shape}, h.shape {h.shape}')
             c, h, x = block(x, (c, h))
             if h.shape[-1] != x.shape[-1]:
@@ -134,30 +133,23 @@ class RegNet(pl.LightningModule):
         loss = F.cross_entropy(outputs, labels)
         return { "loss" : loss }
 
-    def train_dataloader(self):
-        train_ds = torchvision.datasets.CIFAR10(
-            './dataset', True, transform=torchvision.transforms.ToTensor(), download=True)
-        train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=8)
-        return train_dl
-
     def validation_step(self, batch, batch_idx):
         images, labels = batch
         outputs = self(images)
         loss = F.cross_entropy(outputs, labels)
         return { "val_loss" : loss }
 
-    def val_dataloader(self):
-        val_ds = torchvision.datasets.CIFAR10(
-            './dataset', False, transform=torchvision.transforms.ToTensor(), download=True)
-        val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=8)
-        return val_dl
-
+    def test_step(self, batch, batch_idx):
+        images, labels = batch
+        outputs = self(images)
+        loss = F.cross_entropy(outputs, labels)
+        return { "test_loss" : loss }
 
 if __name__  == "__main__":
-    model = RegNet(3, 10, 'lstm')
-    output = model(torch.randn(4, 3, 224, 224))
-    #print(output.shape)
-    trainer =  Trainer(fast_dev_run=True)
-    trainer.fit(model)
+    cfm = Cifar10DataModule()
+    model = RegNet(cfm.dims[0], cfm.num_classes, 'gru')
+    logger = TensorBoardLogger('./logs', name='regnet_logs')
+    trainer = Trainer(fast_dev_run=True, logger=logger)
+    trainer.fit(model, cfm)
 
 
