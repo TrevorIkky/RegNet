@@ -109,9 +109,10 @@ class RegNet(pl.LightningModule):
         self.flatten = nn.Flatten()
         self.output = nn.Linear(2048, classes)
 
-        self.train_accuracy = tm.Accuracy()
-        self.test_accuracy = tm.Accuracy()
         self.val_accuracy = tm.Accuracy()
+        self.test_accuracy = tm.Accuracy()
+        self.train_accuracy = tm.Accuracy()
+
 
     def forward(self, x) -> torch.Tensor:
         x = self.conv1(x)
