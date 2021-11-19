@@ -141,7 +141,8 @@ class RegNet(pl.LightningModule):
         loss = F.cross_entropy(outputs, labels)
         outputs = torch.argmax(outputs, dim=-1)
         accuracy = self.train_accuracy(outputs, labels)
-        return { "loss" : loss, "accuracy": accuracy }
+        self.log('train_accuracy_step', accuracy, prog_bar=True)
+        return { "loss" : loss }
 
     def validation_step(self, batch, batch_idx):
         images, labels = batch
@@ -149,7 +150,8 @@ class RegNet(pl.LightningModule):
         loss = F.cross_entropy(outputs, labels)
         outputs = torch.argmax(outputs, dim=-1)
         accuracy = self.val_accuracy(outputs, labels)
-        return { "val_loss" : loss, "val_accuracy": accuracy }
+        self.log('val_accuracy_step', accuracy, prog_bar=True)
+        return { "val_loss" : loss }
 
     def test_step(self, batch, batch_idx):
         images, labels = batch
@@ -158,7 +160,8 @@ class RegNet(pl.LightningModule):
 
         outputs = torch.argmax(outputs, dim=-1)
         accuracy = self.test_accuracy(outputs, labels)
-        return { "test_loss" : loss, "test_accuracy": accuracy}
+        self.log('test_accuracy_step',  accuracy, prog_bar=True)
+        return { "test_loss" : loss}
 
 if __name__  == "__main__":
     cfm = Cifar10DataModule()
@@ -169,7 +172,8 @@ if __name__  == "__main__":
     ### Callbacks
     stop_early = EarlyStopping(monitor='val_accuracy', patience=3)
 
-    trainer = Trainer(fast_dev_run=True, logger=logger)
+    MAX_EPOCHS = 15
+    trainer = Trainer(fast_dev_run=True, logger=logger, max_epochs=MAX_EPOCHS)
     trainer.fit(model, cfm)
 
 
