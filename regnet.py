@@ -157,7 +157,6 @@ class RegNet(pl.LightningModule):
         images, labels = batch
         outputs = self(images)
         loss = F.cross_entropy(outputs, labels)
-
         outputs = torch.argmax(outputs, dim=-1)
         accuracy = self.test_accuracy(outputs, labels)
         self.log('test_accuracy_step',  accuracy, prog_bar=True)
@@ -172,8 +171,12 @@ if __name__  == "__main__":
     ### Callbacks
     stop_early = EarlyStopping(monitor='val_accuracy', patience=3)
 
-    MAX_EPOCHS = 15
-    trainer = Trainer(fast_dev_run=True, logger=logger, max_epochs=MAX_EPOCHS)
+    MAX_EPOCHS = 30
+
+    trainer = Trainer(
+        gpus=1, fast_dev_run=False, logger=logger,
+        max_epochs=MAX_EPOCHS, callbacks=[stop_early]
+    )
     trainer.fit(model, cfm)
 
 
