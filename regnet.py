@@ -167,7 +167,7 @@ if __name__  == "__main__":
     logger = TensorBoardLogger('logs', name='regnet_logs')
 
     ### Callbacks
-    stop_early = EarlyStopping(monitor='val_loss', patience=3)
+    stop_early = EarlyStopping(monitor='val_accuracy', patience=3)
 
     trainer = Trainer(fast_dev_run=True, logger=logger)
     trainer.fit(model, cfm)
