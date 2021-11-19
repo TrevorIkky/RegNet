@@ -12,7 +12,7 @@ class Cifar10DataModule(pl.LightningDataModule):
 
         #dataset specific items
         self.num_classes = 10
-        self.dims = (3, 32, 32)
+        self.image_dims = (3, 32, 32)
 
         self.data_dir = data_dir
         self.batch_size = batch_size

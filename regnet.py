@@ -1,7 +1,9 @@
 import torch
 import typing
 import torch.nn as nn
+import torchmetrics as tm
 import torch.nn.functional as F
+
 import pytorch_lightning as pl
 from conv_rnns import ConvGRUCell, ConvLSTMCell
 
@@ -9,6 +11,7 @@ from conv_rnns import ConvGRUCell, ConvLSTMCell
 from torch.optim import Adam
 from pytorch_lightning.trainer import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from cifar10_datamodule import Cifar10DataModule
 
 learning_rate = 3e-4
@@ -106,6 +109,10 @@ class RegNet(pl.LightningModule):
         self.flatten = nn.Flatten()
         self.output = nn.Linear(2048, classes)
 
+        self.train_accuracy = tm.Accuracy()
+        self.test_accuracy = tm.Accuracy()
+        self.val_accuracy = tm.Accuracy()
+
     def forward(self, x) -> torch.Tensor:
         x = self.conv1(x)
         x = self.bn1(x)
@@ -131,24 +138,36 @@ class RegNet(pl.LightningModule):
         images, labels = batch
         outputs = self(images)
         loss = F.cross_entropy(outputs, labels)
-        return { "loss" : loss }
+        outputs = torch.argmax(outputs, dim=-1)
+        accuracy = self.train_accuracy(outputs, labels)
+        return { "loss" : loss, "accuracy": accuracy }
 
     def validation_step(self, batch, batch_idx):
         images, labels = batch
         outputs = self(images)
         loss = F.cross_entropy(outputs, labels)
-        return { "val_loss" : loss }
+        outputs = torch.argmax(outputs, dim=-1)
+        accuracy = self.val_accuracy(outputs, labels)
+        return { "val_loss" : loss, "val_accuracy": accuracy }
 
     def test_step(self, batch, batch_idx):
         images, labels = batch
         outputs = self(images)
         loss = F.cross_entropy(outputs, labels)
-        return { "test_loss" : loss }
+
+        outputs = torch.argmax(outputs, dim=-1)
+        accuracy = self.test_accuracy(outputs, labels)
+        return { "test_loss" : loss, "test_accuracy": accuracy}
 
 if __name__  == "__main__":
     cfm = Cifar10DataModule()
-    model = RegNet(cfm.dims[0], cfm.num_classes, 'gru')
+    model = RegNet(cfm.image_dims[0], cfm.num_classes, 'gru')
+    ### Log metric progression
     logger = TensorBoardLogger('logs', name='regnet_logs')
+
+    ### Callbacks
+    stop_early = EarlyStopping(monitor='val_loss', patience=3)
+
     trainer = Trainer(fast_dev_run=True, logger=logger)
     trainer.fit(model, cfm)
 
