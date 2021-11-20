@@ -9,7 +9,7 @@ from conv_rnns import ConvGRUCell, ConvLSTMCell
 
 
 from torch.optim import Adam, SGD
-from torch.optim.lr_scheduler import StepLR
+from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
 from pytorch_lightning.trainer import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
@@ -17,6 +17,7 @@ from cifar10_datamodule import Cifar10DataModule
 
 learning_rate = 0.1
 momentum = 0.9
+weight_decay = 1e-4
 max_epochs = 10
 batch_size = 64
 
@@ -136,8 +137,8 @@ class RegNet(pl.LightningModule):
 
 
     def configure_optimizers(self):
-        optimizer= SGD(self.parameters(), lr=learning_rate, momentum=momentum)
-        lr_scheduler = StepLR(optimizer, step_size=5, gamma=0.1)
+        optimizer= SGD(self.parameters(), lr=learning_rate, weight_decay=weight_decay, momentum=momentum)
+        lr_scheduler = ReduceLROnPlateau(optimizer, mode='min', verbose=True)
         return { "optimizer": optimizer, "lr_scheduler": lr_scheduler }
     def training_step(self, batch, batch_idx):
         images, labels = batch
