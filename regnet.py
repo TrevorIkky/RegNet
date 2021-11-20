@@ -8,13 +8,15 @@ import pytorch_lightning as pl
 from conv_rnns import ConvGRUCell, ConvLSTMCell
 
 
-from torch.optim import Adam
+from torch.optim import Adam, SGD
+from torch.optim.lr_scheduler import StepLR
 from pytorch_lightning.trainer import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from cifar10_datamodule import Cifar10DataModule
 
-learning_rate = 3e-4
+learning_rate = 0.1
+momentum = 0.9
 max_epochs = 10
 batch_size = 32
 
@@ -132,17 +134,21 @@ class RegNet(pl.LightningModule):
         x = self.flatten(x)
         return self.output(x)
 
-    def configure_optimizers(self):
-        return Adam(self.parameters(), lr=learning_rate)
 
+    def configure_optimizers(self):
+        optimizer= SGD(self.parameters(), lr=learning_rate, momentum=momentum)
+        lr_scheduler = StepLR(optimizer, step_size=5, gamma=0.1)
+        return { "optimizer": optimizer, "lr_scheduler": lr_scheduler }
     def training_step(self, batch, batch_idx):
         images, labels = batch
         outputs = self(images)
         loss = F.cross_entropy(outputs, labels)
         outputs = torch.argmax(outputs, dim=-1)
         accuracy = self.train_accuracy(outputs, labels)
-        self.log('train_accuracy_step', accuracy, prog_bar=True)
         return { "loss" : loss }
+
+    def training_epoch_end(self, outputs):
+        self.log('train_accuracy', self.train_accuracy, prog_bar=True)
 
     def validation_step(self, batch, batch_idx):
         images, labels = batch
@@ -150,8 +156,11 @@ class RegNet(pl.LightningModule):
         loss = F.cross_entropy(outputs, labels)
         outputs = torch.argmax(outputs, dim=-1)
         accuracy = self.val_accuracy(outputs, labels)
-        self.log('val_accuracy_step', accuracy, prog_bar=True)
         return { "val_loss" : loss }
+
+    def validation_epoch_end(self, outputs):
+        self.log('val_accuracy', self.val_accuracy, prog_bar=True)
+
 
     def test_step(self, batch, batch_idx):
         images, labels = batch
@@ -161,6 +170,9 @@ class RegNet(pl.LightningModule):
         accuracy = self.test_accuracy(outputs, labels)
         self.log('test_accuracy_step',  accuracy, prog_bar=True)
         return { "test_loss" : loss}
+
+    def test_epoch_end(self, outputs):
+        self.log('test_accuracy', self.test_accuracy, prog_bar=True)
 
 if __name__  == "__main__":
     cfm = Cifar10DataModule()

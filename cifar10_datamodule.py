@@ -45,7 +45,7 @@ class Cifar10DataModule(pl.LightningDataModule):
     def val_dataloader(self):
         return DataLoader(
             self.cifar_val, batch_size=self.batch_size,
-            num_workers=self.num_workers, shuffle=True
+            num_workers=self.num_workers, shuffle=False
         )
 
     def test_dataloader(self):
