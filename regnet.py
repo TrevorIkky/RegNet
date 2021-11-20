@@ -18,7 +18,7 @@ from cifar10_datamodule import Cifar10DataModule
 learning_rate = 0.1
 momentum = 0.9
 max_epochs = 10
-batch_size = 32
+batch_size = 64
 
 class rnn_regulated_block(nn.Module):
     def __init__(self, in_channels, intermediate_channels, rnn_cell, identity_block=None, stride=1):
