@@ -26,19 +26,19 @@ class rnn_regulated_block(nn.Module):
         super(rnn_regulated_block, self).__init__()
         #print(f'In channels {in_channels} | Intermediate channels: {intermediate_channels} ')
         self.identity_block = identity_block
-        self.conv1 = nn.Conv2d(in_channels, intermediate_channels, kernel_size=1, stride=1)
+        self.conv1 = nn.Conv2d(in_channels, intermediate_channels, kernel_size=1, stride=1, bias=False)
         self.bn1 = nn.BatchNorm2d(intermediate_channels)
         self.relu = nn.ReLU()
 
         self.rnn_cell = rnn_cell
         self.bn2 = nn.BatchNorm2d(intermediate_channels)
-        self.conv2 = nn.Conv2d(intermediate_channels, intermediate_channels, kernel_size=3, padding=1, stride=1)
+        self.conv2 = nn.Conv2d(intermediate_channels, intermediate_channels, kernel_size=3, padding=1, stride=1, bias=False)
         self.bn2 = nn.BatchNorm2d(intermediate_channels)
 
         self.conv3 = nn.LazyConv2d(intermediate_channels, kernel_size=1, stride=stride)
         self.bn3 = nn.BatchNorm2d(intermediate_channels)
 
-        self.conv4 = nn.Conv2d(intermediate_channels, intermediate_channels * 4, kernel_size=1, stride=1)
+        self.conv4 = nn.Conv2d(intermediate_channels, intermediate_channels * 4, kernel_size=1, stride=1, bias=False)
         self.bn4 = nn.BatchNorm2d(intermediate_channels * 4)
     def forward(self, x:torch.Tensor, state:typing.Tuple) -> typing.Tuple:
         c, h = state
@@ -107,7 +107,7 @@ class RegNet(pl.LightningModule):
                     )
                 )
 
-        self.state_avg_pool = nn.AvgPool2d(kernel_size=2, stride=2)
+        self.state_max_pool = nn.MaxPool2d(kernel_size=2, stride=2)
         self.regulated_blocks = nn.ModuleList(regulated_blocks)
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
         self.flatten = nn.Flatten()
@@ -128,9 +128,9 @@ class RegNet(pl.LightningModule):
             #print(f'Block: {i}, x.shape: {x.shape}, h.shape {h.shape}')
             c, h, x = block(x, (c, h))
             if h.shape[-1] != x.shape[-1]:
-                h = self.state_avg_pool(h)
+                h = self.state_max_pool(h)
                 if c is not None:
-                    c = self.state_avg_pool(c)
+                    c = self.state_max_pool(c)
 
         x = self.avg_pool(x)
         x = self.flatten(x)
@@ -141,6 +141,7 @@ class RegNet(pl.LightningModule):
         optimizer= Adam(self.parameters(), lr=learning_rate)
         lr_scheduler = StepLR(optimizer, step_size=5, gamma=0.1)
         return { "optimizer": optimizer, "lr_scheduler": lr_scheduler }
+
     def training_step(self, batch, batch_idx):
         images, labels = batch
         outputs = self(images)
