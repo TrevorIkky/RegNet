@@ -18,7 +18,7 @@ from cifar10_datamodule import Cifar10DataModule
 learning_rate = 0.1
 momentum = 0.9
 weight_decay = 1e-4
-max_epochs = 10
+max_epochs = 30
 batch_size = 64
 
 class rnn_regulated_block(nn.Module):
@@ -69,11 +69,11 @@ class rnn_regulated_block(nn.Module):
         return c, h, self.relu(x)
 
 class RegNet(pl.LightningModule):
-    def __init__(self, in_dim:int, classes:int=3, cell_type:str='gru', layers:typing.List=[3, 4, 6, 3]):
+    def __init__(self, in_dim:int, intermediate_channels:int, classes:int=3, cell_type:str='gru', layers:typing.List=[3, 4, 6, 3]):
         super(RegNet, self).__init__()
         self.layers = layers
         self.classes = classes
-        self.intermediate_channels = 64
+        self.intermediate_channels = intermediate_channels
         self.conv1 = nn.Conv2d(in_dim, self.intermediate_channels, kernel_size=7, padding=3, bias=False)
         self.bn1 = nn.BatchNorm2d(self.intermediate_channels)
         self.relu = nn.ReLU()
@@ -84,7 +84,7 @@ class RegNet(pl.LightningModule):
         for layer in range(len(layers)):
             stride = 1 if layer < 1 else 2
             channels = self.intermediate_channels if layer < 1 else self.intermediate_channels // 2
-            h_channels = 64
+            h_channels = intermediate_channels
             identity_block = None
             if layer > 1:
                 identity_block = nn.Sequential(
@@ -110,7 +110,7 @@ class RegNet(pl.LightningModule):
         self.regulated_blocks = nn.ModuleList(regulated_blocks)
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
         self.flatten = nn.Flatten()
-        self.output = nn.Linear(2048, classes)
+        self.output = nn.LazyLinear(classes)
 
         self.val_accuracy = tm.Accuracy()
         self.test_accuracy = tm.Accuracy()
@@ -139,14 +139,14 @@ class RegNet(pl.LightningModule):
     def configure_optimizers(self):
         optimizer= SGD(self.parameters(), lr=learning_rate, weight_decay=weight_decay, momentum=momentum)
         lr_scheduler = ReduceLROnPlateau(optimizer, mode='min', verbose=True)
-        return { "optimizer": optimizer, "lr_scheduler": lr_scheduler }
+        return { "optimizer": optimizer, "lr_scheduler": lr_scheduler, "monitor" : "train_accuracy" }
     def training_step(self, batch, batch_idx):
         images, labels = batch
         outputs = self(images)
         loss = F.cross_entropy(outputs, labels)
         outputs = torch.argmax(outputs, dim=-1)
         accuracy = self.train_accuracy(outputs, labels)
-        return { "loss" : loss }
+        return { "loss" : loss, "accuracy" : accuracy }
 
     def training_epoch_end(self, outputs):
         self.log('train_accuracy', self.train_accuracy, prog_bar=True)
@@ -157,7 +157,7 @@ class RegNet(pl.LightningModule):
         loss = F.cross_entropy(outputs, labels)
         outputs = torch.argmax(outputs, dim=-1)
         accuracy = self.val_accuracy(outputs, labels)
-        return { "val_loss" : loss }
+        return { "val_loss" : loss, "val_accuracy" : accuracy }
 
     def validation_epoch_end(self, outputs):
         self.log('val_accuracy', self.val_accuracy, prog_bar=True)
@@ -169,26 +169,23 @@ class RegNet(pl.LightningModule):
         loss = F.cross_entropy(outputs, labels)
         outputs = torch.argmax(outputs, dim=-1)
         accuracy = self.test_accuracy(outputs, labels)
-        self.log('test_accuracy_step',  accuracy, prog_bar=True)
-        return { "test_loss" : loss}
+        return { "test_loss" : loss, "test_accuracy" : accuracy}
 
     def test_epoch_end(self, outputs):
         self.log('test_accuracy', self.test_accuracy, prog_bar=True)
 
 if __name__  == "__main__":
-    cfm = Cifar10DataModule()
-    model = RegNet(cfm.image_dims[0], cfm.num_classes, 'gru')
+    cfm = Cifar10DataModule(batch_size=batch_size)
+    model = RegNet(cfm.image_dims[0], 32, cfm.num_classes, 'gru')
     ### Log metric progression
     logger = TensorBoardLogger('logs', name='regnet_logs')
 
     ### Callbacks
     stop_early = EarlyStopping(monitor='val_accuracy', patience=3)
 
-    MAX_EPOCHS = 30
-
     trainer = Trainer(
-        gpus=1, fast_dev_run=False, logger=logger,
-        max_epochs=MAX_EPOCHS, callbacks=[stop_early]
+        gpus=0, fast_dev_run=True, logger=logger,
+        max_epochs=max_epochs, callbacks=[stop_early]
     )
     trainer.fit(model, cfm)
 
