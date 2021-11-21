@@ -22,7 +22,7 @@ max_epochs = 30
 batch_size = 64
 
 class rnn_regulated_block(nn.Module):
-    def __init__(self, in_channels, intermediate_channels, rnn_cell, identity_block=None, stride=1):
+    def __init__(self, in_channels, intermediate_channels, rnn_cell=None, identity_block=None, stride=1):
         super(rnn_regulated_block, self).__init__()
         #print(f'In channels {in_channels} | Intermediate channels: {intermediate_channels} ')
         self.identity_block = identity_block
@@ -41,15 +41,17 @@ class rnn_regulated_block(nn.Module):
         self.conv4 = nn.Conv2d(intermediate_channels, intermediate_channels * 4, kernel_size=1, stride=1)
         self.bn4 = nn.BatchNorm2d(intermediate_channels * 4)
     def forward(self, x:torch.Tensor, state:typing.Tuple) -> typing.Tuple:
+        c, h = state
         y = x.clone()
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
 
-        if isinstance(self.rnn_cell, ConvLSTMCell):
-            c, h = self.rnn_cell(x, state)
-        else:
-            c = None; h = self.rnn_cell(x, state[1])
+        if self.rnn_cell is not None:
+            if isinstance(self.rnn_cell, ConvLSTMCell):
+                c, h = self.rnn_cell(x, state)
+            else:
+                c = None; h = self.rnn_cell(x, state[1])
 
         x = self.conv2(x)
         x = self.bn2(x)
@@ -100,9 +102,8 @@ class RegNet(pl.LightningModule):
 
             for block in range(layers[layer] - 1):
                 self.intermediate_channels = channels * 4 if block < 1 else self.intermediate_channels
-                conv_lstm = self.cell(channels, h_channels , kernel_size=3)
                 regulated_blocks.append(rnn_regulated_block(
-                        self.intermediate_channels, channels, conv_lstm
+                        self.intermediate_channels, channels
                     )
                 )
 
@@ -137,7 +138,7 @@ class RegNet(pl.LightningModule):
 
 
     def configure_optimizers(self):
-        optimizer= Adam(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
+        optimizer= Adam(self.parameters(), lr=learning_rate)
         lr_scheduler = StepLR(optimizer, step_size=5, gamma=0.1)
         return { "optimizer": optimizer, "lr_scheduler": lr_scheduler }
     def training_step(self, batch, batch_idx):
