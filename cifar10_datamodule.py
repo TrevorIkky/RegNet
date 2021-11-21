@@ -17,8 +17,11 @@ class Cifar10DataModule(pl.LightningDataModule):
         self.data_dir = data_dir
         self.batch_size = batch_size
         self.num_workers = num_workers
+
         self.transform = transforms.Compose([
-            transforms.ToTensor()
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=(0.4914, 0.4822, 0.4465), std=(0.2470, 0.2435, 0.2616))
         ])
 
     def prepare_data(self):
