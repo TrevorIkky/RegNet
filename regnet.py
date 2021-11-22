@@ -67,7 +67,8 @@ class rnn_regulated_block(nn.Module):
         x = self.bn4(x)
 
         if self.identity_block is not None:
-            x += self.identity_block(y)
+            y = self.identity_block(y)
+        x += y
         return c, h, self.relu(x)
 
 class RegNet(pl.LightningModule):
@@ -87,12 +88,10 @@ class RegNet(pl.LightningModule):
             stride = 1 if layer < 1 else 2
             channels = self.intermediate_channels if layer < 1 else self.intermediate_channels // 2
             h_channels = intermediate_channels
-            identity_block = None
-            if layer > 1:
-                identity_block = nn.Sequential(
-                    nn.Conv2d(self.intermediate_channels, channels * 4, kernel_size=1, stride=stride, bias=False),
-                    nn.BatchNorm2d(channels * 4)
-                )
+            identity_block = nn.Sequential(
+                nn.Conv2d(self.intermediate_channels, channels * 4, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm2d(channels * 4)
+            )
 
             regulated_blocks.append(rnn_regulated_block(
                 self.intermediate_channels, channels,
