@@ -12,13 +12,14 @@ class Cifar10DataModule(pl.LightningDataModule):
 
         #dataset specific items
         self.num_classes = 10
-        self.image_dims = (3, 32, 32)
+        self.image_dims = (3, 224, 224)
 
         self.data_dir = data_dir
         self.batch_size = batch_size
         self.num_workers = num_workers
 
         self.transform = transforms.Compose([
+            transforms.Resize((224, 224)),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize(mean=(0.4914, 0.4822, 0.4465), std=(0.2470, 0.2435, 0.2616))
