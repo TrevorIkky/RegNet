@@ -77,7 +77,7 @@ class rnn_regulated_block(nn.Module):
         return c, h, self.relu(x)
 
 class RegNet(pl.LightningModule):
-    def __init__(self, regulated_block:nn.Module, in_dim:int, intermediate_channels:int, classes:int=3, cell_type:str='gru', layers:typing.List=[3, 4, 6, 3], **kwargs):
+    def __init__(self, regulated_block:nn.Module, in_dim:int, intermediate_channels:int, classes:int=3, cell_type:str='gru', layers:typing.List=[3, 4, 6, 3], config=None):
         super(RegNet, self).__init__()
         self.layers = layers
         self.classes = classes
@@ -122,9 +122,7 @@ class RegNet(pl.LightningModule):
         self.test_accuracy = tm.Accuracy()
         self.train_accuracy = tm.Accuracy()
 
-        self.config = {}
-        for key, val in kwargs.items():
-            self.config[key] = val
+        self.config = config
 
     def forward(self, x) -> torch.Tensor:
         x = self.conv1(x)
@@ -149,7 +147,7 @@ class RegNet(pl.LightningModule):
         learning_rate = 0.1
         weight_decay = 5e-4
 
-        if len(self.config.items()) > 0:
+        if self.config is not None:
             learning_rate = self.config['lr']
             weight_decay = self.config['weight_decay']
 
@@ -287,6 +285,7 @@ def TunePBT(train_fn, model:str, num_samples:int=10, num_epochs:int=10, cpus_per
             "block2": tune.randint(2, 5),
             "block3": tune.randint(2, 5),
             "block4": tune.randint(2, 5),
+            "cell_type": ['gru', 'lstm'],
             "lr": tune.loguniform(1e-4, 1e-1),
             "weight_decay": tune.loguniform(1e-4, 1e-5),
             "batch_size": [32, 64, 128],
@@ -296,7 +295,7 @@ def TunePBT(train_fn, model:str, num_samples:int=10, num_epochs:int=10, cpus_per
 
     reporter = CLIReporter(
         parameter_columns=[ "block1", "block2", "block3", "block4", "lr", "batch_size", "weight_decay"],
-        metric_columns=["loss", "val_accuracy", "training_iteration"])
+        metric_columns=["val_loss", "val_accuracy", "training_iteration"])
 
     analysis = tune.run(
         tune.with_parameters(
@@ -324,7 +323,7 @@ if __name__  == "__main__":
     args = parser.parse_args()
     if args.tune:
         TunePBT(
-            train_regnet, 'regnet', num_samples=30, num_epochs=3,
+            train_regnet, 'regnet', num_samples=30, num_epochs=2,
             cpus_per_trial=4, gpus_per_trial=1
         )
 
