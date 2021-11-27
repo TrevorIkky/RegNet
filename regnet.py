@@ -308,7 +308,7 @@ def TunePBT(train_fn, model:str, num_samples:int=10, num_epochs:int=10, cpus_per
             "gpu": gpus_per_trial
         },
         metric="val_loss", mode="min", config=config,
-        num_samples=num_samples, scheduler=scheduler, progress_reporter=reporter, name=f"{model}_asha"
+        num_samples=num_samples, scheduler=scheduler, progress_reporter=reporter, name=f"{model}_pbt"
     )
     print("Best hyperparameters found were: ", analysis.best_config)
     exit(0)
@@ -336,10 +336,10 @@ if __name__  == "__main__":
     logger = TensorBoardLogger('logs', name='regnet_logs')
 
     ### Callbacks
-    stop_early = EarlyStopping(monitor='val_accuracy', patience=3)
+    stop_early = EarlyStopping(monitor='val_accuracy', patience=3, mode='max')
     last_chkpt_path = 'checkpoints/last.ckpt'
     checkpoint = ModelCheckpoint(
-        dirpath= last_chkpt_path, monitor='val_accuracy',
+        dirpath= last_chkpt_path, monitor='val_accuracy', mode='max',
         filename='{epoch}-{val_accuracy:.2f}', verbose=True, save_top_k=1
     )
 
