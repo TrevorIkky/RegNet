@@ -90,7 +90,9 @@ class RegNet(pl.LightningModule):
         self.cell = ConvGRUCell if cell_type == 'gru' else ConvLSTMCell
         regulated_blocks = []
 
-        for layer in range(len(layers)):
+        num_layers = len(layers)
+
+        for layer in range(num_layers):
             stride = 1 if layer < 1 else 2
             channels = self.intermediate_channels if layer < 1 else self.intermediate_channels // 2
             h_channels = intermediate_channels
@@ -105,8 +107,9 @@ class RegNet(pl.LightningModule):
                 identity_block, stride
             ))
 
+            self.intermediate_channels = channels * 4
+
             for block in range(layers[layer] - 1):
-                self.intermediate_channels = channels * 4 if block < 1 else self.intermediate_channels
                 regulated_blocks.append(regulated_block(
                         self.intermediate_channels, channels
                     )
@@ -130,13 +133,14 @@ class RegNet(pl.LightningModule):
         x = self.relu(x)
         x = self.max_pool(x)
         c, h = torch.zeros(x.shape), torch.zeros(x.shape)
-        for _, block in enumerate(self.regulated_blocks):
+        for i, block in enumerate(self.regulated_blocks):
             #print(f'Block: {i}, x.shape: {x.shape}, h.shape {h.shape}')
             c, h, x = block(x, (c, h))
             if h.shape[-1] != x.shape[-1]:
                 h = self.state_max_pool(h)
                 if c is not None:
                     c = self.state_max_pool(c)
+
 
         x = self.avg_pool(x)
         x = self.flatten(x)
@@ -204,7 +208,7 @@ def train_regnet(config, num_epochs=10, num_gpus=1):
     intermediate_channels = config['intermediate_channels']
     cell_type = config['cell_type']
 
-    cfm = Cifar10DataModule(batch_size=batch_size)
+    cfm = Cifar10DataModule('/notebooks/RegNet/dataset',batch_size=batch_size, download=False)
     model = RegNet(
         rnn_regulated_block, cfm.image_dims[0], intermediate_channels,
         classes=cfm.num_classes, cell_type=cell_type, layers=layers, config=config
@@ -215,7 +219,7 @@ def train_regnet(config, num_epochs=10, num_gpus=1):
 
 
     #Tune callback
-    tune_report = TuneReportCallback({ "loss": "val_loss", "val_accuracy": "val_accuracy"}, on="validation_end")
+    tune_report = TuneReportCallback({ "val_loss": "val_loss", "val_accuracy": "val_accuracy"}, on="validation_end")
     tune_report_ckpt = TuneReportCheckpointCallback(
         metrics={ "val_loss": "val_loss", "val_accuracy": "val_accuracy"},
         filename="tune_last_ckpt", on="validation_end"
@@ -259,7 +263,7 @@ def TuneAsha(train_fn, model:str, num_samples:int=10, num_epochs:int=10, cpus_pe
             "cpu": cpus_per_trial,
             "gpu": gpus_per_trial
         },
-        metric="val_loss", mode="min", config=config,
+        metric="val_accuracy", mode="max", config=config,
         num_samples=num_samples, scheduler=scheduler, progress_reporter=reporter, name=f"{model}_asha"
     )
     print("Best hyperparameters found were: ", analysis.best_config)
@@ -267,10 +271,10 @@ def TuneAsha(train_fn, model:str, num_samples:int=10, num_epochs:int=10, cpus_pe
 
 def TunePBT(train_fn, model:str, num_samples:int=10, num_epochs:int=10, cpus_per_trial:int=1, gpus_per_trial:int=1, data_dir='./tuner'):
     config = {
-        "block1": tune.randint(2, 3),
-        "block2": tune.randint(2, 5),
-        "block3": tune.randint(2, 5),
-        "block4": tune.randint(2, 5),
+        "block1": tune.randint(1, 3),
+        "block2": tune.randint(1, 4),
+        "block3": tune.randint(1, 4),
+        "block4": tune.randint(1, 4),
         "cell_type": tune.choice(['gru', 'lstm']),
         "intermediate_channels": tune.choice([16, 32, 64]),
         "lr": tune.loguniform(1e-4, 1e-1),
@@ -281,10 +285,10 @@ def TunePBT(train_fn, model:str, num_samples:int=10, num_epochs:int=10, cpus_per
     scheduler = PopulationBasedTraining(
         perturbation_interval=4,
         hyperparam_mutations={
-            "block1": tune.randint(2, 3),
-            "block2": tune.randint(2, 5),
-            "block3": tune.randint(2, 5),
-            "block4": tune.randint(2, 5),
+            "block1": tune.randint(1, 3),
+            "block2": tune.randint(1, 4),
+            "block3": tune.randint(1, 4),
+            "block4": tune.randint(1, 4),
             "cell_type": ['gru', 'lstm'],
             "lr": tune.loguniform(1e-4, 1e-1),
             "weight_decay": tune.loguniform(1e-4, 1e-5),
@@ -306,7 +310,7 @@ def TunePBT(train_fn, model:str, num_samples:int=10, num_epochs:int=10, cpus_per
             "cpu": cpus_per_trial,
             "gpu": gpus_per_trial
         },
-        metric="val_loss", mode="min", config=config,
+        metric="val_accuracy", mode="max", config=config,
         num_samples=num_samples, scheduler=scheduler, progress_reporter=reporter, name=f"{model}_pbt"
     )
     print("Best hyperparameters found were: ", analysis.best_config)
@@ -328,7 +332,7 @@ if __name__  == "__main__":
         )
 
     cfm = Cifar10DataModule(batch_size=batch_size)
-    model = RegNet(rnn_regulated_block, cfm.image_dims[0], 32, cfm.num_classes, 'gru', [2, 2, 2, 2])
+    model = RegNet(rnn_regulated_block, cfm.image_dims[0], 32, cfm.num_classes, 'gru', [2, 1, 1, 2])
 
 
     ### Log metric progression
@@ -336,7 +340,7 @@ if __name__  == "__main__":
 
     ### Callbacks
     stop_early = EarlyStopping(monitor='val_accuracy', patience=3, mode='max')
-    last_chkpt_path = 'checkpoints/last.ckpt'
+    last_chkpt_path = 'checkpoints/regnet.last.ckpt'
     checkpoint = ModelCheckpoint(
         dirpath= last_chkpt_path, monitor='val_accuracy', mode='max',
         filename='{epoch}-{val_accuracy:.2f}', verbose=True, save_top_k=1

@@ -7,7 +7,7 @@ from torchvision.datasets import CIFAR10
 from torch.utils.data import random_split, DataLoader
 
 class Cifar10DataModule(pl.LightningDataModule):
-    def __init__(self, data_dir:str='./dataset', batch_size:int=32, num_workers:int=8):
+    def __init__(self, data_dir:str='./dataset', batch_size:int=32, num_workers:int=8, download=True):
         super().__init__()
 
         #dataset specific items
@@ -17,6 +17,7 @@ class Cifar10DataModule(pl.LightningDataModule):
         self.data_dir = data_dir
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.download = download
 
         self.transform = transforms.Compose([
             transforms.Resize((224, 224)),
@@ -27,8 +28,8 @@ class Cifar10DataModule(pl.LightningDataModule):
 
     def prepare_data(self):
         #Do tasks such as download data
-        CIFAR10(self.data_dir, train=True, download=True)
-        CIFAR10(self.data_dir, train=False, download=True)
+        CIFAR10(self.data_dir, train=True, download=self.download)
+        CIFAR10(self.data_dir, train=False, download=self.download)
 
     def setup(self, stage: Optional[str] = None):
         if stage == 'fit' or stage is None:
