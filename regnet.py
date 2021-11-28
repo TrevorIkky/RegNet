@@ -82,8 +82,8 @@ class RegNet(pl.LightningModule):
         self.layers = layers
         self.classes = classes
         self.intermediate_channels = intermediate_channels
-        #self.conv1 = nn.Conv2d(in_dim, self.intermediate_channels, kernel_size=7, padding=3, bias=False)
-        self.conv1 = nn.Conv2d(in_dim, self.intermediate_channels, kernel_size=3, stride=1, padding=1, bias=False)
+        self.conv1 = nn.Conv2d(in_dim, self.intermediate_channels, kernel_size=7, padding=3, bias=False)
+        #self.conv1 = nn.Conv2d(in_dim, self.intermediate_channels, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(self.intermediate_channels)
         self.relu = nn.ReLU()
         self.max_pool = nn.MaxPool2d((3, 3) , padding=1, stride=2)
@@ -128,7 +128,7 @@ class RegNet(pl.LightningModule):
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
-        #x = self.max_pool(x)
+        x = self.max_pool(x)
         c, h = torch.zeros(x.shape), torch.zeros(x.shape)
         for _, block in enumerate(self.regulated_blocks):
             #print(f'Block: {i}, x.shape: {x.shape}, h.shape {h.shape}')
