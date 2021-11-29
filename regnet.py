@@ -298,7 +298,11 @@ def TunePBT(train_fn, model:str, num_samples:int=10, num_epochs:int=10, cpus_per
     )
 
     reporter = CLIReporter(
-        parameter_columns=[ "block1", "block2", "block3", "block4", "lr", "batch_size", "weight_decay"],
+        parameter_columns=[
+            "block1", "block2", "block3",
+            "block4", "cell_type", "lr",
+            "batch_size", "intermediate_channels" ,"weight_decay"
+        ],
         metric_columns=["val_loss", "val_accuracy", "training_iteration"])
 
     analysis = tune.run(
