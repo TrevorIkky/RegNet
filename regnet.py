@@ -278,7 +278,7 @@ def TunePBT(train_fn, model:str, num_samples:int=10, num_epochs:int=10, cpus_per
         "cell_type": tune.choice(['gru', 'lstm']),
         "intermediate_channels": tune.choice([16, 32, 64]),
         "lr": tune.loguniform(1e-4, 1e-1),
-        "batch_size": tune.choice([32, 64, 128]),
+        "batch_size": tune.choice([32, 64, 128, 256, 512]),
         "weight_decay": tune.loguniform(1e-4, 1e-5),
     }
 
@@ -293,7 +293,7 @@ def TunePBT(train_fn, model:str, num_samples:int=10, num_epochs:int=10, cpus_per
             "lr": tune.loguniform(1e-4, 1e-1),
             "weight_decay": tune.loguniform(1e-4, 1e-5),
             "batch_size": [32, 64, 128],
-            "intermediate_channels": [16, 32, 64],
+            "intermediate_channels": [16, 32, 64, 128, 256, 512],
         }
     )
 
@@ -344,7 +344,7 @@ if __name__  == "__main__":
 
     ### Callbacks
     stop_early = EarlyStopping(monitor='val_accuracy', patience=3, mode='max')
-    last_chkpt_path = 'checkpoints/regnet.last.ckpt'
+    last_chkpt_path = 'checkpoints/regnet.ckpts'
     checkpoint = ModelCheckpoint(
         dirpath= last_chkpt_path, monitor='val_accuracy', mode='max',
         filename='{epoch}-{val_accuracy:.2f}', verbose=True, save_top_k=1
