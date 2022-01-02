@@ -1,5 +1,4 @@
 import torch
-import typing
 import torch.nn as nn
 import torchmetrics as tm
 import torch.nn.functional as F
@@ -7,6 +6,8 @@ import torch.nn.functional as F
 import argparse
 
 import pytorch_lightning as pl
+from torch.functional import Tensor
+from typing import Tuple, Dict, List
 from conv_rnns import ConvGRUCell, ConvLSTMCell
 
 
@@ -26,42 +27,70 @@ momentum = 0.9
 max_epochs = 30
 batch_size = 64
 
+class SELayer(nn.Module):
+    def __init__(self, in_dim:int, reduction_factor:int=8) -> None:
+        super(SELayer, self).__init__()
+        self.global_avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.sequential= nn.Sequential(
+            nn.Linear(in_dim, in_dim // reduction_factor, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(in_dim // reduction_factor, in_dim, bias=False),
+            nn.Sigmoid()
+        )
+    def forward(self, x:Tensor):
+        B, C, _, _ = x.shape
+        y = self.global_avg_pool(x).view(B, C)
+        y = self.sequential(y).view(B, C, 1, 1)
+        x = x * y.expand_as(x)
+        return x
+
+
+
 class rnn_regulated_block(nn.Module):
-    def __init__(self, in_channels, intermediate_channels, rnn_cell=None, identity_block=None, stride=1):
+    def __init__(self, h_dim, in_channels, intermediate_channels, rnn_cell, identity_block=None, stride=1):
         super(rnn_regulated_block, self).__init__()
         #print(f'In channels {in_channels} | Intermediate channels: {intermediate_channels} ')
+        self.stride = stride
         self.identity_block = identity_block
         self.conv1 = nn.Conv2d(in_channels, intermediate_channels, kernel_size=1, stride=1, bias=False)
         self.bn1 = nn.BatchNorm2d(intermediate_channels)
         self.relu = nn.ReLU()
 
         self.rnn_cell = rnn_cell
-        self.bn2 = nn.BatchNorm2d(intermediate_channels)
         self.conv2 = nn.Conv2d(intermediate_channels, intermediate_channels, kernel_size=3, padding=1, stride=1, bias=False)
         self.bn2 = nn.BatchNorm2d(intermediate_channels)
 
-        self.conv3 = nn.LazyConv2d(intermediate_channels, kernel_size=1, stride=stride)
+        #Multiply intermediate_channels by 2, torch.cat([hidden_state, x])
+        self.conv3 = nn.Conv2d(h_dim + intermediate_channels, intermediate_channels, kernel_size=1, stride=stride)
         self.bn3 = nn.BatchNorm2d(intermediate_channels)
 
         self.conv4 = nn.Conv2d(intermediate_channels, intermediate_channels * 4, kernel_size=1, stride=1, bias=False)
         self.bn4 = nn.BatchNorm2d(intermediate_channels * 4)
-    def forward(self, x:torch.Tensor, state:typing.Tuple) -> typing.Tuple:
+
+        self.se_layer = SELayer(intermediate_channels * 4, reduction_factor=8)
+
+        #Cell state dim remains constant but aspect ratio of the feature map is variable
+        self.downsample_state = nn.LazyConv2d(h_dim, kernel_size=3, stride=stride, padding=1)
+
+
+    def forward(self, x:torch.Tensor, state:Tuple) -> Tuple:
         c, h = state
         y = x.clone()
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
 
-        if self.rnn_cell is not None:
-            if isinstance(self.rnn_cell, ConvLSTMCell):
-                c, h = self.rnn_cell(x, state)
-            else:
-                c = None; h = self.rnn_cell(x, state[1])
+        print(f'Block running. x.shape : {x.shape}, h shape: {h.shape}')
+
+        if isinstance(self.rnn_cell, ConvGRUCell):
+            c = None
+            h = self.rnn_cell(x, h)
+        else:
+            c, h = self.rnn_cell(x, state)
 
         x = self.conv2(x)
         x = self.bn2(x)
         x = self.relu(x)
-        #print(f'Block running. x.shape : {x.shape}, h shape: {h.shape}')
         x = torch.cat([x, h], dim=1)
 
         x = self.conv3(x)
@@ -71,51 +100,72 @@ class rnn_regulated_block(nn.Module):
         x = self.conv4(x)
         x = self.bn4(x)
 
+        x = self.se_layer(x)
+
         if self.identity_block is not None:
             y = self.identity_block(y)
+            if c is not None:
+                s = torch.cat([c, h], dim=1)
+                s = self.downsample_state(s)
+                c, h = torch.split(s, self.h_dim, dim=1)
+            else:
+                h = self.downsample_state(h)
+
         x += y
+
         return c, h, self.relu(x)
 
+
 class RegNet(pl.LightningModule):
-    def __init__(self, regulated_block:nn.Module, in_dim:int, intermediate_channels:int, classes:int=3, cell_type:str='gru', layers:typing.List=[3, 4, 6, 3], config=None):
+    def __init__(self, regulated_block:nn.Module, in_dim:int, h_dim:int,
+                 classes:int=3, cell_type:str='gru', layers:List=[3, 4, 6, 3], config=None):
         super(RegNet, self).__init__()
         self.layers = layers
         self.classes = classes
-        self.intermediate_channels = intermediate_channels
-        self.conv1 = nn.Conv2d(in_dim, self.intermediate_channels, kernel_size=7, padding=3, bias=False)
-        #self.conv1 = nn.Conv2d(in_dim, self.intermediate_channels, kernel_size=3, stride=1, padding=1, bias=False)
+        self.intermediate_channels = 64
+        self.h_dim = h_dim
+        #self.conv1 = nn.Conv2d(in_dim, self.intermediate_channels, kernel_size=7, stride=2, padding=3, bias=False)
+        self.conv1 = nn.Conv2d(in_dim, self.intermediate_channels, kernel_size=3, stride=1, padding=2, bias=False)
         self.bn1 = nn.BatchNorm2d(self.intermediate_channels)
         self.relu = nn.ReLU()
         self.max_pool = nn.MaxPool2d((3, 3) , padding=1, stride=2)
         self.cell = ConvGRUCell if cell_type == 'gru' else ConvLSTMCell
-        regulated_blocks = []
 
+        regulated_blocks = []
         num_layers = len(layers)
 
         for layer in range(num_layers):
-            stride = 1 if layer < 1 else 2
-            channels = self.intermediate_channels if layer < 1 else self.intermediate_channels // 2
-            h_channels = intermediate_channels
+            stride = 2
+            channels = self.intermediate_channels // 2
+
+            if layer < 1:
+                stride = 1
+                channels = self.intermediate_channels
+
+
             identity_block = nn.Sequential(
                 nn.Conv2d(self.intermediate_channels, channels * 4, kernel_size=1, stride=stride, bias=False),
                 nn.BatchNorm2d(channels * 4)
             )
 
-            regulated_blocks.append(regulated_block(
-                self.intermediate_channels, channels,
-                self.cell(channels,h_channels , kernel_size=3),
-                identity_block, stride
-            ))
+            regulated_blocks.append(
+                regulated_block(
+                    self.h_dim, self.intermediate_channels, channels,
+                    self.cell(channels, h_dim , kernel_size=3),
+                    identity_block, stride
+                )
+            )
 
             self.intermediate_channels = channels * 4
 
             for block in range(layers[layer] - 1):
-                regulated_blocks.append(regulated_block(
-                        self.intermediate_channels, channels
+                regulated_blocks.append(
+                    regulated_block(
+                        self.h_dim, self.intermediate_channels, channels,
+                        self.cell(channels, h_dim, kernel_size=3)
                     )
                 )
 
-        self.state_max_pool = nn.MaxPool2d(kernel_size=2, stride=2)
         self.regulated_blocks = nn.ModuleList(regulated_blocks)
         self.avg_pool = nn.AdaptiveAvgPool2d((1, 1))
         self.flatten = nn.Flatten()
@@ -127,20 +177,20 @@ class RegNet(pl.LightningModule):
 
         self.config = config
 
-    def forward(self, x) -> torch.Tensor:
+
+    def forward(self, x) -> Tensor:
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
-        x = self.max_pool(x)
-        c, h = torch.zeros(x.shape), torch.zeros(x.shape)
-        for i, block in enumerate(self.regulated_blocks):
-            #print(f'Block: {i}, x.shape: {x.shape}, h.shape {h.shape}')
-            c, h, x = block(x, (c, h))
-            if h.shape[-1] != x.shape[-1]:
-                h = self.state_max_pool(h)
-                if c is not None:
-                    c = self.state_max_pool(c)
+        #x = self.max_pool(x)
+        B, _, H, W = x.shape
 
+        c, h = torch.zeros(B, self.h_dim, H, W), \
+            torch.zeros(B, self.h_dim, H, W)
+
+        for i, block in enumerate(self.regulated_blocks):
+            print(f'Block {i}, x shape: {x.shape}, h shape: {h.shape}')
+            c, h, x = block(x, (c, h))
 
         x = self.avg_pool(x)
         x = self.flatten(x)
@@ -159,6 +209,7 @@ class RegNet(pl.LightningModule):
         lr_scheduler = CosineAnnealingLR(optimizer, T_max=200)
         return { "optimizer": optimizer, "lr_scheduler": lr_scheduler, "monitor":  "val_accuracy"}
 
+
     def training_step(self, batch, batch_idx):
         images, labels = batch
         outputs = self(images)
@@ -167,8 +218,10 @@ class RegNet(pl.LightningModule):
         accuracy = self.train_accuracy(outputs, labels)
         return { "loss" : loss, "accuracy" : accuracy }
 
+
     def training_epoch_end(self, outputs):
         self.log('train_accuracy', self.train_accuracy, prog_bar=True)
+
 
     def validation_step(self, batch, batch_idx):
         images, labels = batch
@@ -177,6 +230,7 @@ class RegNet(pl.LightningModule):
         outputs = torch.argmax(outputs, dim=-1)
         accuracy = self.val_accuracy(outputs, labels)
         return { "val_loss" : loss }
+
 
     def validation_epoch_end(self, outputs):
         avg_loss = torch.stack([x["val_loss"] for x in outputs]).mean()
@@ -191,6 +245,7 @@ class RegNet(pl.LightningModule):
         outputs = torch.argmax(outputs, dim=-1)
         accuracy = self.test_accuracy(outputs, labels)
         return { "test_loss" : loss }
+
 
     def test_epoch_end(self, outputs):
         self.log('test_accuracy', self.test_accuracy, prog_bar=True)
@@ -210,7 +265,7 @@ def train_regnet(config, num_epochs=10, num_gpus=1):
 
     cfm = Cifar10DataModule('/notebooks/RegNet/dataset',batch_size=batch_size, download=False)
     model = RegNet(
-        rnn_regulated_block, cfm.image_dims[0], intermediate_channels,
+        rnn_bottleneck_regulated_block, cfm.image_dims[0], intermediate_channels,
         classes=cfm.num_classes, cell_type=cell_type, layers=layers, config=config
     )
 
@@ -336,7 +391,8 @@ if __name__  == "__main__":
         )
 
     cfm = Cifar10DataModule(batch_size=batch_size)
-    model = RegNet(rnn_regulated_block, cfm.image_dims[0], 32, cfm.num_classes, 'gru', [2, 1, 1, 2])
+    model = RegNet(rnn_regulated_block, cfm.image_dims[0], 64,
+                   cfm.num_classes, 'gru', [2, 1, 1, 2])
 
 
     ### Log metric progression
