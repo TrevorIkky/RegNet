@@ -3,4 +3,5 @@ __pycache__
 logs
 lightning_logs
 .ipynb_checkpoints
-
+*.ckpt
+*.pth

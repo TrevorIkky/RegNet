@@ -25,7 +25,7 @@ from ray.tune.integration.pytorch_lightning import TuneReportCallback, TuneRepor
 
 momentum = 0.9
 max_epochs = 30
-batch_size = 64
+batch_size = 32
 
 class SELayer(nn.Module):
     def __init__(self, in_dim:int, reduction_factor:int=8) -> None:
@@ -115,12 +115,12 @@ class rnn_regulated_block(nn.Module):
 
 
 class RegNet(pl.LightningModule):
-    def __init__(self, regulated_block:nn.Module, in_dim:int, h_dim:int,
+    def __init__(self, regulated_block:nn.Module, in_dim:int, h_dim:int, intermediate_channels:int,
                  classes:int=3, cell_type:str='gru', layers:List=[3, 3, 3], config=None):
         super(RegNet, self).__init__()
         self.layers = layers
         self.classes = classes
-        self.intermediate_channels = 64
+        self.intermediate_channels = intermediate_channels
         self.h_dim = h_dim
         self.cell_type = cell_type
         #self.conv1 = nn.Conv2d(in_dim, self.intermediate_channels, kernel_size=7, stride=2, padding=3, bias=False)
@@ -133,6 +133,8 @@ class RegNet(pl.LightningModule):
         self.rnn_cells = nn.ModuleList()
         self.regulated_blocks = nn.ModuleList()
         num_layers = len(layers)
+        
+        #64, 256, 512, 1025
         
         c_in = self.intermediate_channels
         
@@ -181,6 +183,8 @@ class RegNet(pl.LightningModule):
         self.train_accuracy = tm.Accuracy()
 
         self.config = config
+        
+        self.save_hyperparameters()
 
 
     def forward(self, x) -> Tensor:
@@ -195,14 +199,15 @@ class RegNet(pl.LightningModule):
         
         c, h = self.rnn_cells[0](x, (c, h))
         
-        layer_idx = 1
+        layer_idx = 0
         block_sum = 0
-        
+      
         for i, block in enumerate(self.regulated_blocks):
             c, h, x = block(x, (c, h))
             block_sum += 1
-            if layer_idx < len(self.layers) and block_sum == self.layers[layer_idx]:
-                c, h = self.rnn_cells[layer_idx](x, (c, h))
+            if layer_idx < len(self.layers) - 1 and block_sum == self.layers[layer_idx]:
+                #print(f'Block {i}, {x.shape}, {h.shape}, {block_sum}')
+                c, h = self.rnn_cells[layer_idx + 1](x, (c, h))
                 layer_idx += 1
                 block_sum = 0
 
@@ -213,8 +218,8 @@ class RegNet(pl.LightningModule):
 
 
     def configure_optimizers(self):
-        learning_rate = 0.1
-        weight_decay = 5e-4
+        learning_rate = 0.01015355313229821
+        weight_decay = 1.4356281283408686e-05
 
         if self.config is not None:
             learning_rate = self.config['lr']
@@ -277,10 +282,11 @@ def train_regnet(config, num_epochs=10, num_gpus=1):
     batch_size = config['batch_size']
     intermediate_channels = config['intermediate_channels']
     cell_type = config['cell_type']
+    h_dim = config['h_dim']
 
     cfm = Cifar10DataModule('/notebooks/RegNet/dataset',batch_size=batch_size, download=False)
     model = RegNet(
-        rnn_bottleneck_regulated_block, cfm.image_dims[0], intermediate_channels,
+        rnn_regulated_block, cfm.image_dims[0], h_dim, intermediate_channels,
         classes=cfm.num_classes, cell_type=cell_type, layers=layers, config=config
     )
 
@@ -306,10 +312,9 @@ def train_regnet(config, num_epochs=10, num_gpus=1):
 
 def TuneAsha(train_fn, model:str, num_samples:int=10, num_epochs:int=10, cpus_per_trial:int=1, gpus_per_trial:int=1, data_dir='./tuner'):
     config = {
-        "block1": tune.randint(2, 3),
+        "block1": tune.randint(2, 5),
         "block2": tune.randint(2, 5),
         "block3": tune.randint(2, 5),
-        "block4": tune.randint(2, 5),
         "cell_type": tune.choice(['gru', 'lstm']),
         "intermediate_channels": tune.choice([16, 32, 64]),
         "lr": tune.loguniform(1e-4, 1e-1),
@@ -329,6 +334,7 @@ def TuneAsha(train_fn, model:str, num_samples:int=10, num_epochs:int=10, cpus_pe
             train_fn, num_epochs=num_epochs,
             num_gpus=gpus_per_trial
         ),
+        resume=True,
         resources_per_trial={
             "cpu": cpus_per_trial,
             "gpu": gpus_per_trial
@@ -341,36 +347,35 @@ def TuneAsha(train_fn, model:str, num_samples:int=10, num_epochs:int=10, cpus_pe
 
 def TunePBT(train_fn, model:str, num_samples:int=10, num_epochs:int=10, cpus_per_trial:int=1, gpus_per_trial:int=1, data_dir='./tuner'):
     config = {
-        "block1": tune.randint(1, 3),
-        "block2": tune.randint(1, 4),
-        "block3": tune.randint(1, 4),
-        "block4": tune.randint(1, 4),
+        "block1": tune.randint(3, 8),
+        "block2": tune.randint(3, 8),
+        "block3": tune.randint(3, 8),
+        "block4": tune.randint(3, 8),
+        "h_dim": tune.choice([8, 16, 32, 64, 128]),
         "cell_type": tune.choice(['gru', 'lstm']),
         "intermediate_channels": tune.choice([16, 32, 64]),
         "lr": tune.loguniform(1e-4, 1e-1),
-        "batch_size": tune.choice([32, 64, 128, 256, 512]),
+        "batch_size": tune.choice([32, 64]),
         "weight_decay": tune.loguniform(1e-4, 1e-5),
     }
 
     scheduler = PopulationBasedTraining(
         perturbation_interval=4,
         hyperparam_mutations={
-            "block1": tune.randint(1, 3),
-            "block2": tune.randint(1, 4),
-            "block3": tune.randint(1, 4),
-            "block4": tune.randint(1, 4),
+            "block1": tune.randint(3, 8),
+            "block2": tune.randint(3, 8),
+            "block3": tune.randint(3, 8),
+            "block4": tune.randint(3, 8),
             "cell_type": ['gru', 'lstm'],
             "lr": tune.loguniform(1e-4, 1e-1),
             "weight_decay": tune.loguniform(1e-4, 1e-5),
-            "batch_size": [32, 64, 128],
-            "intermediate_channels": [16, 32, 64, 128, 256, 512],
+            "batch_size": [32, 64],
         }
     )
 
     reporter = CLIReporter(
         parameter_columns=[
-            "block1", "block2", "block3",
-            "block4", "cell_type", "lr",
+            "h_dim","block1", "block2", "block3", "block4", "cell_type", "lr",
             "batch_size", "intermediate_channels" ,"weight_decay"
         ],
         metric_columns=["val_loss", "val_accuracy", "training_iteration"])
@@ -392,6 +397,7 @@ def TunePBT(train_fn, model:str, num_samples:int=10, num_epochs:int=10, cpus_per
 
 #====================================== End Tuning Functions =====================================
 
+#'block1': 1, 'block2': 1, 'block3': 3, 'h_dim': 64, 'cell_type': 'lstm', 'intermediate_channels': 32, 'lr': 0.01015355313229821, 'batch_size': 32, #'weight_decay': 1.4356281283408686e-05 -> Starting Val Accuracy 0.62 
 
 
 if __name__  == "__main__":
@@ -401,13 +407,13 @@ if __name__  == "__main__":
     args = parser.parse_args()
     if args.tune:
         TunePBT(
-            train_regnet, 'regnet', num_samples=30, num_epochs=2,
+            train_regnet, 'regnet', num_samples=10, num_epochs=2,
             cpus_per_trial=4, gpus_per_trial=1
         )
 
     cfm = Cifar10DataModule(batch_size=batch_size)
-    model = RegNet(rnn_regulated_block, cfm.image_dims[0], 32,
-                   cfm.num_classes, 'gru', [3, 3, 3])
+    model = RegNet(rnn_regulated_block, cfm.image_dims[0], 64, 32,
+                   cfm.num_classes, 'lstm', [1, 1, 3])
 
 
     ### Log metric progression
