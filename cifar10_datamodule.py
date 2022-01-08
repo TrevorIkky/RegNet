@@ -20,7 +20,7 @@ class Cifar10DataModule(pl.LightningDataModule):
         self.download = download
 
         self.transform = transforms.Compose([
-            transforms.Resize((112, 112)),
+            #transforms.Resize((112, 112)),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             transforms.Normalize(mean=(0.4914, 0.4822, 0.4465), std=(0.2470, 0.2435, 0.2616))

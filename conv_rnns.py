@@ -78,8 +78,9 @@ class ConvGRUCell(nn.Module):
             kernel_size=kernel_size, padding=kernel_size // 2,  bias=True
         )
         self.intermediate_channels = intermediate_channels
-    def forward(self, x:Tensor, h:Tensor) -> Tensor:
+    def forward(self, x:Tensor, state:typing.Tuple[Tensor, Tensor]) -> Tensor:
         y = x.clone()
+        _, h = state
         h = h.to(device=x.device)
         x = torch.cat([x, h], dim=1)
         x = self.conv_x(x)
@@ -89,7 +90,7 @@ class ConvGRUCell(nn.Module):
         y = torch.cat([y, b * h], dim=1)
         y = torch.tanh(self.conv_y(y))
         h = a * h + (1 - a) * y
-        return h
+        return None, h
 
     def _init_state(self, batch_size:int, channels:int, spatial_dim:typing.Tuple) -> Tensor:
         width, height = spatial_dim
