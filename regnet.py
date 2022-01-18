@@ -17,6 +17,7 @@ from pytorch_lightning.trainer import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from cifar10_datamodule import Cifar10DataModule
+from components_datamodule import ComponentsDataModule
 
 from ray import tune
 from ray.tune import CLIReporter
@@ -269,6 +270,10 @@ class RegNet(pl.LightningModule):
 
     def test_epoch_end(self, outputs):
         self.log('test_accuracy', self.test_accuracy, prog_bar=True)
+        
+    
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        return self(batch)
 
 
 def train_regnet(config, num_epochs=10, num_gpus=1):
@@ -410,10 +415,18 @@ if __name__  == "__main__":
             train_regnet, 'regnet', num_samples=10, num_epochs=2,
             cpus_per_trial=4, gpus_per_trial=1
         )
-
-    cfm = Cifar10DataModule(batch_size=batch_size)
-    model = RegNet(rnn_regulated_block, cfm.image_dims[0], 64, 32,
-                   cfm.num_classes, 'lstm', [1, 1, 3])
+        
+    root_path = '/storage/PCB-Components-L1'
+    cfm = ComponentsDataModule(root_path, batch_size=batch_size)
+    
+    model = RegNet(rnn_regulated_block,
+                   in_dim=3,
+                   h_dim=64,
+                   intermediate_channels=32,
+                   classes=6,
+                   cell_type='lstm',
+                   layers=[1, 1, 3]
+                  )
 
 
     ### Log metric progression

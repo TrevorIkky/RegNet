@@ -2,6 +2,7 @@ import os
 import torch
 import numpy as np
 import pytorch_lightning as pl
+import torchvision.transforms as T
 from PIL import Image
 from typing import Optional
 from torch.utils.data import random_split, Dataset, DataLoader
@@ -14,6 +15,16 @@ class ComponentsDataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.transforms = transforms
+        if self.transforms is None:
+            transforms = T.Compose([
+                T.Resize((112, 112)),
+                T.ColorJitter(brightness=.5, hue=.3),
+                T.GaussianBlur(kernel_size=(5, 9), sigma=(0.1, 5)),
+                T.RandomSolarize(threshold=192.0),
+                T.ToTensor(),
+                T.Normalize(mean=(0.2979, 0.2789, 0.2408), std=(0.2960, 0.2848, 0.2620))
+            ])
+            self.transforms = transforms
 
     def prepare_data(self) -> None:
         # Tasks like downloading data
@@ -23,9 +34,10 @@ class ComponentsDataModule(pl.LightningDataModule):
         components_ds = ComponentsDataset(self.root_path, self.transforms)
         size_components_ds = len(components_ds)
         train_size = int(size_components_ds * 0.7)
-        val_test_size = int(size_components_ds * 0.15)
+        val_size = int(size_components_ds * 0.15)
+        test_size = size_components_ds - (train_size + val_size)
         self.train_ds, self.val_ds, self.test_ds = random_split(
-            components_ds, [train_size, val_test_size, val_test_size])
+            components_ds, [train_size, val_size, test_size])
 
     def train_dataloader(self):
         return DataLoader(
@@ -40,7 +52,7 @@ class ComponentsDataModule(pl.LightningDataModule):
         return DataLoader(
             self.val_ds,
             batch_size=self.batch_size,
-            shuffle=True,
+            shuffle=False,
             num_workers=self.num_workers,
             pin_memory=True
         )
@@ -64,6 +76,7 @@ class ComponentsDataset(Dataset):
         self.root_path = root_path
         self.transforms = transforms
         classes, class_idx_dict = self.class_to_idx(root_path)
+        print(class_idx_dict)
         self.classes = classes
         self.class_idx_dict = class_idx_dict
         self.samples = self.get_samples(root_path, class_idx_dict)
@@ -116,7 +129,7 @@ class ComponentsDataset(Dataset):
 
 
 if __name__ == "__main__":
-    root_path = './dummy_dataset'
+    root_path = '/storage/PCB-Components-L1'
     components_ds = ComponentsDataset(root_path)
     it = iter(components_ds)
     next(it)
